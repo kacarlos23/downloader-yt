@@ -652,6 +652,127 @@ def launch_gui() -> None:
         folder.mkdir(parents=True, exist_ok=True)
         os.startfile(folder)
 
+    def build_download_command(
+        *,
+        url: str,
+        media_type: str,
+        output_dir: Path,
+        audio_format: str,
+        video_quality: str,
+        playlist: bool,
+        install_ffmpeg: bool,
+        start_arg: str | None,
+        end_arg: str | None,
+        precise_cut: bool,
+    ) -> list[str]:
+        command = [
+            sys.executable,
+            "-u",
+            str(Path(__file__).resolve()),
+            url,
+            "--tipo",
+            media_type,
+            "--output",
+            str(output_dir),
+            "--audio-format",
+            audio_format,
+            "--video-quality",
+            video_quality,
+        ]
+        if playlist:
+            command.append("--playlist")
+        if install_ffmpeg:
+            command.append("--install-ffmpeg")
+        if start_arg:
+            command.extend(["--start", start_arg])
+        if end_arg:
+            command.extend(["--end", end_arg])
+        if precise_cut:
+            command.append("--precise-cut")
+        return command
+
+    def send_process_output(text: str, *, is_error: bool = False) -> None:
+        clean = text.strip()
+        if not clean:
+            return
+
+        now = time.monotonic()
+        is_progress = (
+            clean.startswith("[download]")
+            or clean.startswith("Baixando ")
+            or clean.startswith("frame=")
+            or "ETA" in clean
+        )
+        if is_progress:
+            if now - last_progress_sent["at"] >= 0.35:
+                last_progress_sent["at"] = now
+                put_event("progress", None, clean)
+            return
+
+        noisy_ffmpeg_prefixes = (
+            "Input #",
+            "Output #",
+            "Stream #",
+            "Metadata:",
+            "Duration:",
+            "Press [q]",
+        )
+        if clean.startswith(noisy_ffmpeg_prefixes):
+            return
+
+        log_message(f"[erro] {clean}" if is_error else clean)
+
+    def read_process_stream(stream: Any, *, is_error: bool = False) -> None:
+        buffer = ""
+        while True:
+            char = stream.read(1)
+            if not char:
+                break
+            if char in {"\r", "\n"}:
+                send_process_output(buffer, is_error=is_error)
+                buffer = ""
+            else:
+                buffer += char
+                if len(buffer) >= 1000:
+                    send_process_output(buffer, is_error=is_error)
+                    buffer = ""
+        send_process_output(buffer, is_error=is_error)
+
+    def run_download_process(command: list[str]) -> int:
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            env=env,
+            creationflags=creationflags,
+        )
+
+        stdout_thread = threading.Thread(
+            target=read_process_stream,
+            args=(process.stdout,),
+            kwargs={"is_error": False},
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=read_process_stream,
+            args=(process.stderr,),
+            kwargs={"is_error": True},
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+        returncode = process.wait()
+        stdout_thread.join(timeout=2)
+        stderr_thread.join(timeout=2)
+        return returncode
+
     def load_video_info() -> None:
         url = url_var.get().strip()
         if not url:
@@ -726,24 +847,26 @@ def launch_gui() -> None:
         playlist_selected = playlist_var.get()
         install_ffmpeg_selected = install_ffmpeg_var.get()
         precise_cut_selected = precise_cut_var.get()
+        command = build_download_command(
+            url=url,
+            media_type=media_type,
+            output_dir=output_dir,
+            audio_format=audio_format,
+            video_quality=video_quality,
+            playlist=playlist_selected,
+            install_ffmpeg=install_ffmpeg_selected,
+            start_arg=start_arg,
+            end_arg=end_arg,
+            precise_cut=precise_cut_selected,
+        )
 
         def worker() -> None:
             try:
-                download_media(
-                    url,
-                    media_type=media_type,
-                    output_dir=output_dir,
-                    audio_format=audio_format,
-                    video_quality=video_quality,
-                    playlist=playlist_selected,
-                    install_ffmpeg=install_ffmpeg_selected,
-                    start_time=start_arg,
-                    end_time=end_arg,
-                    precise_cut=precise_cut_selected,
-                    message_func=log_message,
-                    progress_func=progress_message,
-                )
-                put_event("done")
+                returncode = run_download_process(command)
+                if returncode == 0:
+                    put_event("done")
+                else:
+                    put_event("download_error", f"O processo de download terminou com codigo {returncode}.")
             except BaseException as exc:
                 put_event("download_error", str(exc))
 
