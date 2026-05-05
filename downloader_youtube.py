@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -414,8 +415,15 @@ def launch_gui() -> None:
     def log_message(message: str) -> None:
         put_event("log", message.rstrip())
 
+    last_progress_sent = {"at": 0.0}
+
     def progress_message(status: dict[str, Any]) -> None:
         if status.get("status") == "downloading":
+            now = time.monotonic()
+            if now - last_progress_sent["at"] < 0.25:
+                return
+            last_progress_sent["at"] = now
+
             total = status.get("total_bytes") or status.get("total_bytes_estimate")
             downloaded = status.get("downloaded_bytes") or 0
             percent = (downloaded / total * 100) if total else None
@@ -653,6 +661,7 @@ def launch_gui() -> None:
         load_button.configure(state="disabled")
         info_var.set("Carregando dados do video...")
         log_message("[info] Carregando dados do video...")
+        playlist_selected = playlist_var.get()
 
         def worker() -> None:
             try:
@@ -661,7 +670,7 @@ def launch_gui() -> None:
                 options: dict[str, Any] = {
                     "quiet": True,
                     "no_warnings": True,
-                    "noplaylist": not playlist_var.get(),
+                    "noplaylist": not playlist_selected,
                     "logger": YtdlpLogger(log_message),
                 }
                 if deno_available:
@@ -710,20 +719,27 @@ def launch_gui() -> None:
         download_button.configure(state="disabled")
         load_button.configure(state="disabled")
         log_message("[download] Iniciando...")
+        media_type = type_var.get()
+        output_dir = Path(output_var.get()).expanduser()
+        audio_format = audio_format_var.get()
+        video_quality = video_quality_var.get().lower()
+        playlist_selected = playlist_var.get()
+        install_ffmpeg_selected = install_ffmpeg_var.get()
+        precise_cut_selected = precise_cut_var.get()
 
         def worker() -> None:
             try:
                 download_media(
                     url,
-                    media_type=type_var.get(),
-                    output_dir=Path(output_var.get()).expanduser(),
-                    audio_format=audio_format_var.get(),
-                    video_quality=video_quality_var.get().lower(),
-                    playlist=playlist_var.get(),
-                    install_ffmpeg=install_ffmpeg_var.get(),
+                    media_type=media_type,
+                    output_dir=output_dir,
+                    audio_format=audio_format,
+                    video_quality=video_quality,
+                    playlist=playlist_selected,
+                    install_ffmpeg=install_ffmpeg_selected,
                     start_time=start_arg,
                     end_time=end_arg,
-                    precise_cut=precise_cut_var.get(),
+                    precise_cut=precise_cut_selected,
                     message_func=log_message,
                     progress_func=progress_message,
                 )
