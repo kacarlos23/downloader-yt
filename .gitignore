@@ -1,9 +1,11 @@
 downloads/
-test_*/
 __pycache__/
-*.py[cod]
-*.part
-*.temp.*
-*.log
+*.pyc
+*.pyo
+*.pyd
+.Python
 .venv/
 venv/
+build/
+dist/
+*.spec

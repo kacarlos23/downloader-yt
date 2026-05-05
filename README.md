@@ -29,6 +29,16 @@ Baixar apenas um trecho:
 py downloader_youtube.py "URL_DO_YOUTUBE" --start 10:15 --end 12:30
 ```
 
+## Gerar executavel
+
+No Windows, rode:
+
+```powershell
+.\build_exe.ps1
+```
+
+O arquivo final sera criado em `dist/DownloaderYT.exe`.
+
 ## Observacoes
 
 - O script instala `yt-dlp` automaticamente se precisar.

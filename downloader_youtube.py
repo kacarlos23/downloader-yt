@@ -211,6 +211,19 @@ def format_time(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+def make_download_ranges(time_range: tuple[float, float]) -> Callable[[dict[str, Any], Any], Any]:
+    start_seconds, end_seconds = time_range
+
+    def download_ranges(info_dict: dict[str, Any], ydl: Any) -> list[dict[str, float]]:
+        segment: dict[str, float] = {"start_time": start_seconds}
+        # Só envia o end_time se ele não for infinito
+        if end_seconds != float("inf"):
+            segment["end_time"] = end_seconds
+        return [segment]
+
+    return download_ranges
+
+
 def build_output_template(output_dir: Path) -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
     return str(output_dir / "%(title).180B [%(id)s].%(ext)s")
@@ -291,7 +304,6 @@ def download_media(
     progress_func: ProgressFunc | None = None,
 ) -> None:
     yt_dlp = import_yt_dlp(message_func=message_func)
-    from yt_dlp.utils import download_range_func
 
     deno_available = use_deno_if_available()
     time_range = build_time_range(start_time, end_time)
@@ -316,7 +328,7 @@ def download_media(
     if deno_available:
         options["remote_components"] = ["ejs:github"]
     if time_range:
-        options["download_ranges"] = download_range_func([], [time_range])
+        options["download_ranges"] = make_download_ranges(time_range)
         options["force_keyframes_at_cuts"] = precise_cut
         start_display, end_display = (format_time(value) for value in time_range)
         message_func(f"[trecho] Baixando apenas de {start_display} ate {end_display}.")
@@ -701,6 +713,8 @@ def launch_gui() -> None:
             clean.startswith("[download]")
             or clean.startswith("Baixando ")
             or clean.startswith("frame=")
+            or clean.startswith("size=")
+            or "time=" in clean
             or "ETA" in clean
         )
         if is_progress:
